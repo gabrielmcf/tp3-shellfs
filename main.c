@@ -15,5 +15,14 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
-    // ext2fs_re
+
+
+    ext2_ino_t dir;
+
+    err = ext2fs_check_directory(fs, EXT2_ROOT_INO);
+
+    if (err) {
+        com_err(argv[0], err, "ao abrir sistema de arquivos %s", fsname);
+        exit(1);
+    }
 }
