@@ -15,13 +15,15 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/dcc_fs_shell",
-            "args": ["teste.img"],
-            "stopAtEntry": true,
+            "args": ["8mb.img"],
+            "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
             "externalConsole": false,
+            // "console": "integratedTerminal",
+            // "integratedTerminal":true,
             "MIMode": "gdb",
-            // "preLaunchTask": "Build",
+            "preLaunchTask": "Build",
             "setupCommands": [
                 {
                     "description": "Enable pretty-printing for gdb",
