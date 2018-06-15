@@ -15,7 +15,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/dcc_fs_shell",
-            "args": ["8mb.img"],
+            "args": ["teste.img"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],

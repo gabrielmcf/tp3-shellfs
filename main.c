@@ -7,6 +7,18 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <inttypes.h>
+
+ #include <sys/sysmacros.h>
+#if defined(_AIX)
+#define _BSD
+#endif
+#if defined(__sgi) || defined(__sun)            /* Some systems need this */
+#include <sys/mkdev.h>                          /* To get major() and minor() */
+#endif
+#if defined(__hpux)                             /* Other systems need this */
+#include <sys/mknod.h>
+#endif
 
 #include "inc/types.h"
 #include "inc/superblock.h"
@@ -14,6 +26,11 @@
 #include "inc/inode.h"
 #include "inc/directoryentry.h"
 
+#define BASE_OFFSET 1024  /* location of the super-block in the first group */
+
+#define BLOCK_OFFSET(block) (BASE_OFFSET + (block-1)*block_size)
+
+u_int16_t block_size;
 struct os_superblock_t *superblock;
 struct os_blockgroup_descriptor_t *group_descr;
 struct os_inode_t *inodes;
@@ -202,29 +219,76 @@ int cd(int fd, int base_inode_num)
 
 }
 
+// #define EXT2_FT_UNKNOWN   0  //  Unknown File Type
+// #define EXT2_FT_REG_FILE  1  //  Regular File
+// #define EXT2_FT_DIR       2  //  Directory File
+// #define EXT2_FT_CHRDEV    3  //  Character Device
+// #define EXT2_FT_BLKDEV    4  //  Block Device
+// #define EXT2_FT_FIFO      5  //  Buffer File
+// #define EXT2_FT_SOCK      6  //  Socket File
+// #define EXT2_FT_SYMLINK   7  //  Symbolic Link
+
 void my_stat(int fd, int base_inode_num)
 {
 	char dirname[255];
+	char file_type[30];
 	char* name;
 	int ret;
-	struct os_inode_t inode;
+	struct stat true_stat;
+	struct os_inode_t *ino = malloc(sizeof(struct os_inode_t));
+	struct os_direntry_t* dirEntry = malloc(sizeof(struct os_direntry_t));
 
 	scanf("%s", dirname);
-	// printf("li: %s\n",dirname);
 
 	ret = findInodeByName(fd, base_inode_num, dirname, EXT2_FT_DIR);
 
+	lseek(fd, BLOCK_OFFSET(group_descr->bg_inode_table)+(ret-1)*sizeof(struct os_inode_t), SEEK_SET);
+
+	read(fd, (void *)dirEntry, sizeof(struct os_direntry_t));
+
+	stat(dirname, &true_stat);
 	
+	switch(dirEntry->file_type){
+			case EXT2_FT_UNKNOWN: //  Unknown File Type
+				strcpy(file_type,"tipo desconhecido");
+				break;
+			case EXT2_FT_REG_FILE:  //  Regular File
+				strcpy(file_type,"arquivo comum");
+				break;
+			case EXT2_FT_DIR:  //  Directory File
+				strcpy(file_type,"diretório");
+				break;
+			case EXT2_FT_CHRDEV: //  Character Device
+				strcpy(file_type,"dispositivo de caracteres");
+				break;
+			case EXT2_FT_BLKDEV: //  Block Device
+				strcpy(file_type,"dispositivo de bloco");
+				break;
+			case EXT2_FT_FIFO: //  Buffer File
+				strcpy(file_type,"arquivo de buffer");
+				break;
+			case EXT2_FT_SOCK: //  Socket File
+				strcpy(file_type,"soquete");
+				break;
+			case EXT2_FT_SYMLINK: //  Symbolic Link
+				strcpy(file_type,"link simbólico");
+				break;
+		}
+
+	assert(lseek(fd, (off_t)(group_descr->bg_inode_table*1024), SEEK_SET) == (off_t)(group_descr->bg_inode_table*1024));
+
+	assert(read(fd, (void *)inodes, 0x40000) == 0x40000);
+
 
 	if(ret==-1) {
 		printf("Arquivo %s não existe!\n", dirname);
 		return;
 	} else {
-		inode = inodes[ret-1];
+		ino = &inodes[dirEntry->inode-1];
 		printf("File: \"%s\"\n", dirname);
-		printf("Size: %d\t Blocks: %d\t", inode.i_size, inode.i_blocks);
-		printf("block size \t\t= %d bytes\n", 1<<(10 + superblock->s_log_block_size));
-		printf("inode count \t\t= %d\n", superblock->s_inodes_count);
+		printf("Size: %u\tBlocks: %u\tIO Blocks %d\t%s\n", ino->i_size, ino->i_blocks, 1024 << superblock->s_log_block_size, file_type);
+		printf("Device(ta errado): %u\tInode: %d\tLinks(ta errado): %hu\n", major(true_stat.st_dev), ret, ino->i_links_count);
+		printf("\n\ninode count \t\t= %d\n", superblock->s_inodes_count);
 		printf("inode size \t\t= %d\n", superblock->s_inode_size);
 		printf("inode table address \t= %d\n", group_descr->bg_inode_table);
 		printf("inode table size \t= %dKB\n", (superblock->s_inodes_count*superblock->s_inode_size)>>10);
@@ -296,7 +360,7 @@ int main(int argc, char **argv)
 	descr_list_size = group_count * sizeof(struct os_blockgroup_descriptor_t);
 
 
-	
+	block_size = 1024 << superblock->s_log_block_size;
 
 
 	// struct os_blockgroup_descriptor_t group_descr;
