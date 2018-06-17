@@ -32,17 +32,22 @@
 
 u_int16_t block_size;
 struct os_superblock_t *superblock;
-struct os_blockgroup_descriptor_t *group_descr;
-struct os_inode_t *inodes;
+struct os_blockgroup_descriptor_t **group_descr;
+struct os_inode_t **inodes;
 
-void read_superblock(int fd)
-{
-	superblock = malloc(sizeof(struct os_superblock_t));
-	assert(superblock != NULL);
+// static void read_inode(int fd, int inode_no, const struct os_blockgroup_descriptor_t group, struct os_inode_t inode){
+// 	lseek(fd, BLOCK_OFFSET(group->bg_inode_table)+(inode_no-1)*sizeof(struct ext2_inode), SEEK_SET);
+// 	read(fd, inode, sizeof(struct ext2_inode));
+// }
+
+// void read_superblock(int fd)
+// {
+// 	superblock = malloc(sizeof(struct os_superblock_t));
+// 	assert(superblock != NULL);
        
-	assert(lseek(fd, (off_t)1024, SEEK_SET) == (off_t)1024);
-	assert(read(fd, (void *)superblock, sizeof(struct os_superblock_t)) == sizeof(struct os_superblock_t));
-}
+// 	assert(lseek(fd, (off_t)1024, SEEK_SET) == (off_t)1024);
+// 	assert(read(fd, (void *)superblock, sizeof(struct os_superblock_t)) == sizeof(struct os_superblock_t));
+// }
 
 // void read_blockgroup(int fd)
 // {
@@ -102,7 +107,7 @@ void printInodeType(int inode_type)
 void printInodePerm(int fd, int inode_num)
 {
 	//int curr_pos = lseek(fd, 0, SEEK_CUR);
-	short int mode = inodes[inode_num-1].i_mode;
+	short int mode = inodes[0][inode_num-1].i_mode;
 
 	mode & EXT2_S_IRUSR ? printf("r") : printf("-");
 	mode & EXT2_S_IWUSR ? printf("w") : printf("-");
@@ -129,7 +134,7 @@ int findInodeByName(int fd, int base_inode_num, char* filename, int filetype)
 
 	struct os_direntry_t* dirEntry = malloc(sizeof(struct os_direntry_t));
 	assert (dirEntry != NULL);
-	assert(lseek(fd, (off_t)(inodes[base_inode_num-1].i_block[0]*1024), SEEK_SET) == (off_t)(inodes[base_inode_num-1].i_block[0]*1024));
+	assert(lseek(fd, (off_t)(inodes[0][base_inode_num-1].i_block[0]*1024), SEEK_SET) == (off_t)(inodes[0][base_inode_num-1].i_block[0]*1024));
 	assert(read(fd, (void *)dirEntry, sizeof(struct os_direntry_t)) == sizeof(struct os_direntry_t));
 
 	 while (dirEntry->inode) {
@@ -166,7 +171,7 @@ void ls(int fd, int base_inode_num)
 
 	struct os_direntry_t* dirEntry = malloc(sizeof(struct os_direntry_t));
 	assert (dirEntry != NULL);
-	assert(lseek(fd, (off_t)(inodes[base_inode_num-1].i_block[0]*1024), SEEK_SET) == (off_t)(inodes[base_inode_num-1].i_block[0]*1024));
+	assert(lseek(fd, (off_t)(inodes[0][base_inode_num-1].i_block[0]*1024), SEEK_SET) == (off_t)(inodes[0][base_inode_num-1].i_block[0]*1024));
 	assert(read(fd, (void *)dirEntry, sizeof(struct os_direntry_t)) == sizeof(struct os_direntry_t));
 
 	 while (dirEntry->inode) {
@@ -242,7 +247,7 @@ void my_stat(int fd, int base_inode_num)
 
 	ret = findInodeByName(fd, base_inode_num, dirname, EXT2_FT_DIR);
 
-	lseek(fd, BLOCK_OFFSET(group_descr->bg_inode_table)+(ret-1)*sizeof(struct os_inode_t), SEEK_SET);
+	lseek(fd, BLOCK_OFFSET(group_descr[0]->bg_inode_table)+(ret-1)*sizeof(struct os_inode_t), SEEK_SET);
 
 	read(fd, (void *)dirEntry, sizeof(struct os_direntry_t));
 
@@ -275,7 +280,7 @@ void my_stat(int fd, int base_inode_num)
 				break;
 		}
 
-	assert(lseek(fd, (off_t)(group_descr->bg_inode_table*1024), SEEK_SET) == (off_t)(group_descr->bg_inode_table*1024));
+	assert(lseek(fd, (off_t)(group_descr[0]->bg_inode_table*1024), SEEK_SET) == (off_t)(group_descr[0]->bg_inode_table*1024));
 
 	assert(read(fd, (void *)inodes, 0x40000) == 0x40000);
 
@@ -284,13 +289,13 @@ void my_stat(int fd, int base_inode_num)
 		printf("Arquivo %s não existe!\n", dirname);
 		return;
 	} else {
-		ino = &inodes[dirEntry->inode-1];
+		ino = &inodes[0][dirEntry->inode-1];
 		printf("File: \"%s\"\n", dirname);
 		printf("Size: %u\tBlocks: %u\tIO Blocks %d\t%s\n", ino->i_size, ino->i_blocks, 1024 << superblock->s_log_block_size, file_type);
 		printf("Device(ta errado): %u\tInode: %d\tLinks(ta errado): %hu\n", major(true_stat.st_dev), ret, ino->i_links_count);
 		printf("\n\ninode count \t\t= %d\n", superblock->s_inodes_count);
 		printf("inode size \t\t= %d\n", superblock->s_inode_size);
-		printf("inode table address \t= %d\n", group_descr->bg_inode_table);
+		printf("inode table address \t= %d\n", group_descr[0]->bg_inode_table);
 		printf("inode table size \t= %dKB\n", (superblock->s_inodes_count*superblock->s_inode_size)>>10);
 		return;
 	}
@@ -301,13 +306,14 @@ int shellFs(int fd )
 {
 	char cmd[4];
 	static int pwd_inode = 2;
+	static int pwd_group = 0;
 
 	printf("dcc-shell-fs$ ");
 	scanf("%s", cmd);
 
 	// debug("cmd=%s\n", cmd);
 
-	if(!strcmp(cmd, "q")) {
+	if(!strcmp(cmd, "q") || !strcmp(cmd, "exit")) {
 		return(-1);
 
 	} else if(!strcmp(cmd, "ls")) {
@@ -330,6 +336,9 @@ int shellFs(int fd )
 
 int main(int argc, char **argv)
 {
+	int i;
+	unsigned int inodes_per_block;
+	unsigned int itable_blocks;
 	// open up the disk file
 	if (argc !=2) {
 	printf("usage:  ext-shell <file.img>\n");
@@ -342,55 +351,47 @@ int main(int argc, char **argv)
 		return -1; 
 	}
 
-	// reading superblock
-	// read_superblock(fd);
-
+	//Lê o superbloco
 	superblock = malloc(sizeof(struct os_superblock_t));
 	assert(superblock != NULL);
-       
 	assert(lseek(fd, (off_t)1024, SEEK_SET) == (off_t)1024);
 	assert(read(fd, (void *)superblock, sizeof(struct os_superblock_t)) == sizeof(struct os_superblock_t));
 
-	/* calculate number of block groups on the disk */
+	//Calcula o número de grupos no sistema de arquivos
 	unsigned int group_count;
 	group_count = 1 + (superblock->s_blocks_count - 1) / superblock->s_blocks_per_group;
 
-	/* calculate size of the group descriptor list in bytes */
+	//Calcula o tamanho da lista de descritores de arquivo
 	unsigned int descr_list_size;
 	descr_list_size = group_count * sizeof(struct os_blockgroup_descriptor_t);
 
-
+	//Calcula o tamanho do bloco
 	block_size = 1024 << superblock->s_log_block_size;
 
+	//Aloca e o espaço para os descritores de grupo e os lê
+	group_descr = malloc(group_count);
+	for(i = 0; i < group_count; i++){
+		group_descr[i] = malloc(sizeof(struct os_blockgroup_descriptor_t));
+		lseek(fd, (off_t)BLOCK_OFFSET(2), SEEK_SET);
+		read(fd, (void *)group_descr[i], group_count*sizeof(struct os_blockgroup_descriptor_t));
+	}
 
-	// struct os_blockgroup_descriptor_t group_descr;
-	/* position head above the group descriptor block */
-	/* sd --> storage device, no nosso caso um arquivo */
-	group_descr = malloc(sizeof(struct os_blockgroup_descriptor_t));
-	lseek(fd, (off_t)2048, SEEK_SET);
-	read(fd, (void *)group_descr, sizeof(struct os_blockgroup_descriptor_t));
+	//Calcula a quantidade de inodes por
+	inodes_per_block = block_size / sizeof(struct os_inode_t);
 
 
-	// assert(blockgroup != NULL);
-	
-	// assert(lseek(fd, (off_t)2048, SEEK_SET) == (off_t)2048);
-	// assert(read(fd, (void *)blockgroup, sizeof(struct os_blockgroup_descriptor_t)) == sizeof(struct os_blockgroup_descriptor_t));
-
-	// // reading blockgroup
-	// read_blockgroup(fd);
-	
+	/* size in blocks of the inode table */
+	itable_blocks = superblock->s_inodes_per_group / inodes_per_block;
 
 	// preparing to cache inode table in inodes
-	inodes = (struct os_inode_t*)malloc(superblock->s_inodes_count*superblock->s_inode_size);
+	inodes = malloc(group_count);
 	assert(inodes != NULL);
 
-	// seek to start of inode_table
-	assert(lseek(fd, (off_t)(group_descr->bg_inode_table*1024), SEEK_SET) == (off_t)(group_descr->bg_inode_table*1024));
-
-	assert(read(fd, (void *)inodes, 0x40000) == 0x40000);
-
-	// reading inode table
-	// read_inodeTable(fd);
+	for(i = 0; i < group_count; i++){
+		inodes[i] = malloc(itable_blocks*superblock->s_inode_size);
+		lseek(fd, (off_t)BLOCK_OFFSET(group_descr[i]->bg_inode_table), SEEK_SET);
+		read(fd, (void *)inodes[i], 0x40000);
+	}
 
 	while(1) {
 		// extShell waits for one cmd and executes it.
