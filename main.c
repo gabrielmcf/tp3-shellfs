@@ -35,6 +35,11 @@ struct os_superblock_t *superblock;
 struct os_blockgroup_descriptor_t **group_descr;
 struct os_inode_t **inodes;
 
+struct inode_position {
+	uint32_t group;
+	uint32_t inode;
+};
+
 // static void read_inode(int fd, int inode_no, const struct os_blockgroup_descriptor_t group, struct os_inode_t inode){
 // 	lseek(fd, BLOCK_OFFSET(group->bg_inode_table)+(inode_no-1)*sizeof(struct ext2_inode), SEEK_SET);
 // 	read(fd, inode, sizeof(struct ext2_inode));
@@ -104,10 +109,10 @@ void printInodeType(int inode_type)
 	}
 }
 
-void printInodePerm(int fd, int inode_num)
+void printInodePerm(int fd, int inode_group, int inode_num)
 {
 	//int curr_pos = lseek(fd, 0, SEEK_CUR);
-	short int mode = inodes[0][inode_num-1].i_mode;
+	short int mode = inodes[inode_group][inode_num-1].i_mode;
 
 	mode & EXT2_S_IRUSR ? printf("r") : printf("-");
 	mode & EXT2_S_IWUSR ? printf("w") : printf("-");
@@ -161,18 +166,25 @@ int findInodeByName(int fd, int base_inode_num, char* filename, int filetype)
 }
 
 
-void ls(int fd, int base_inode_num)
+void ls(int fd, struct inode_position pos)
 {
 	char* name;
 	int curr_inode_num;
+	int curr_inode_group;
 	int curr_inode_type;
 
 	// debug("data block addr\t= 0x%x\n", inodes[base_inode_num-1].i_block[0]);
 
+// -rw-r--r-- 1 gabriel gabriel     0 Jun  9 20:56 arquivo2
+// drwx------ 2 gabriel gabriel 12288 Mai 31 10:23 lost+found
+// drwxr-xr-x 2 root    root     1024 Jun 13 22:24 pasta1
+// drwxr-xr-x 3 gabriel gabriel  1024 Jun 13 21:57 pasta2
+
+
 	struct os_direntry_t* dirEntry = malloc(sizeof(struct os_direntry_t));
 	assert (dirEntry != NULL);
-	assert(lseek(fd, (off_t)(inodes[0][base_inode_num-1].i_block[0]*1024), SEEK_SET) == (off_t)(inodes[0][base_inode_num-1].i_block[0]*1024));
-	assert(read(fd, (void *)dirEntry, sizeof(struct os_direntry_t)) == sizeof(struct os_direntry_t));
+	lseek(fd, (off_t)(inodes[pos.group][pos.inode-1].i_block[0]*1024), SEEK_SET);
+	read(fd, (void *)dirEntry, sizeof(struct os_direntry_t));
 
 	 while (dirEntry->inode) {
 
@@ -180,6 +192,7 @@ void ls(int fd, int base_inode_num)
 		memcpy(name, dirEntry->file_name, dirEntry->name_len);
 		name[dirEntry->name_len+1] = '\0';
 
+		curr_inode_group = pos.group;
 		curr_inode_num = dirEntry->inode;
 		curr_inode_type = dirEntry->file_type;
 
@@ -193,7 +206,7 @@ void ls(int fd, int base_inode_num)
 			// debug("rec_len\t\t= %d\n", dirEntry->rec_len);
 			// debug("dirEntry->inode\t= %d\n",dirEntry->inode);
 			printInodeType(curr_inode_type);
-			printInodePerm(fd, curr_inode_num);
+			printInodePerm(fd, curr_inode_group, curr_inode_num);
 			printf("%d\t", curr_inode_num);
 			printf("%s\t", name);
 			printf("\n");
@@ -305,8 +318,11 @@ void my_stat(int fd, int base_inode_num)
 int shellFs(int fd )
 {
 	char cmd[4];
-	static int pwd_inode = 2;
-	static int pwd_group = 0;
+	static struct inode_position pwd;
+	pwd.group = 0;
+	pwd.inode = 2;
+	// static int pwd_inode = 2;
+	// static int pwd_group = 0;
 
 	printf("dcc-shell-fs$ ");
 	scanf("%s", cmd);
@@ -317,15 +333,16 @@ int shellFs(int fd )
 		return(-1);
 
 	} else if(!strcmp(cmd, "ls")) {
-		ls(fd, pwd_inode);
-
-	} else if(!strcmp(cmd, "cd")) {
-		pwd_inode = cd(fd, pwd_inode);
+		ls(fd, pwd);
 
 	} 
-	else if(!strcmp(cmd, "stat")) {
-		my_stat(fd, pwd_inode);
-	} 
+	// else if(!strcmp(cmd, "cd")) {
+	// 	pwd_inode = cd(fd, pwd_inode);
+
+	// } 
+	// else if(!strcmp(cmd, "stat")) {
+	// 	my_stat(fd, pwd_inode);
+	// } 
 	else {
 		printf("Unknown command: %s\n", cmd);
 		return(-EINVAL);
@@ -372,7 +389,7 @@ int main(int argc, char **argv)
 	group_descr = malloc(group_count * sizeof(struct os_blockgroup_descriptor_t*));
 	for(i = 0; i < group_count; i++){
 		group_descr[i] = malloc(sizeof(struct os_blockgroup_descriptor_t));
-		lseek(fd, (off_t)(1024 + (i * superblock->s_blocks_per_group * block_size) + BLOCK_OFFSET(1)), SEEK_SET);
+		lseek(fd, (off_t)(BLOCK_OFFSET(2)+i*sizeof(struct os_blockgroup_descriptor_t)), SEEK_SET);
 		read(fd, (void *)group_descr[i], sizeof(struct os_blockgroup_descriptor_t));
 	}
 
@@ -383,14 +400,15 @@ int main(int argc, char **argv)
 	/* size in blocks of the inode table */
 	itable_blocks = superblock->s_inodes_per_group / inodes_per_block;
 
+	// inodes = (struct os_inode_t*)malloc(superblock->s_inodes_count*superblock->s_inode_size);
 	// preparing to cache inode table in inodes
 	inodes = malloc(group_count*sizeof(struct os_inode_t*));
 	assert(inodes != NULL);
 
 	for(i = 0; i < group_count; i++){
-		inodes[i] = malloc(itable_blocks*superblock->s_inode_size);
+		inodes[i] = malloc(superblock->s_inodes_per_group*superblock->s_inode_size);
 		lseek(fd, (off_t)BLOCK_OFFSET(group_descr[i]->bg_inode_table), SEEK_SET);
-		read(fd, (void *)inodes[i], 0x40000);
+		read(fd, (void *)inodes[i], superblock->s_inodes_per_group*superblock->s_inode_size);
 	}
 
 	while(1) {
