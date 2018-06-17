@@ -30,7 +30,12 @@
 
 #define BLOCK_OFFSET(block) (BASE_OFFSET + (block-1)*block_size)
 
-u_int16_t block_size;
+#define EXT2_FT_ALL 8
+
+#define GROUP_INDEX(inode_num) (inode_num - 1)/superblock->s_inodes_per_group
+#define INODE_INDEX(inode_num) (inode_num - 1)%superblock->s_inodes_per_group
+
+u_int32_t block_size;
 struct os_superblock_t *superblock;
 struct os_blockgroup_descriptor_t **group_descr;
 struct os_inode_t **inodes;
@@ -39,6 +44,10 @@ struct inode_position {
 	uint32_t group;
 	uint32_t inode;
 };
+
+// struct inode_position pwd = { 0,2 };
+// pwd.group = 0;
+// pwd.inode = 2;
 
 // static void read_inode(int fd, int inode_no, const struct os_blockgroup_descriptor_t group, struct os_inode_t inode){
 // 	lseek(fd, BLOCK_OFFSET(group->bg_inode_table)+(inode_no-1)*sizeof(struct ext2_inode), SEEK_SET);
@@ -109,10 +118,10 @@ void printInodeType(int inode_type)
 	}
 }
 
-void printInodePerm(int fd, int inode_group, int inode_num)
+void printInodePerm(int fd, int inode_num)
 {
 	//int curr_pos = lseek(fd, 0, SEEK_CUR);
-	short int mode = inodes[inode_group][inode_num-1].i_mode;
+	short int mode = inodes[GROUP_INDEX(inode_num)][INODE_INDEX(inode_num)].i_mode;
 
 	mode & EXT2_S_IRUSR ? printf("r") : printf("-");
 	mode & EXT2_S_IWUSR ? printf("w") : printf("-");
@@ -129,18 +138,18 @@ void printInodePerm(int fd, int inode_group, int inode_num)
 	//lseek(fd, curr_pos, SEEK_SET);
 }
 
-int findInodeByName(int fd, int base_inode_num, char* filename, int filetype)
+int findInodeByName(int fd, int inode_num, char* filename, int filetype)
 {
 	char* name;
 	int curr_inode_num;
 	int curr_inode_type;
-
+	struct inode_position new_pos;
 	// debug("data block addr\t= 0x%x\n", inodes[base_inode_num-1].i_block[0]);
 
 	struct os_direntry_t* dirEntry = malloc(sizeof(struct os_direntry_t));
 	assert (dirEntry != NULL);
-	assert(lseek(fd, (off_t)(inodes[0][base_inode_num-1].i_block[0]*1024), SEEK_SET) == (off_t)(inodes[0][base_inode_num-1].i_block[0]*1024));
-	assert(read(fd, (void *)dirEntry, sizeof(struct os_direntry_t)) == sizeof(struct os_direntry_t));
+	lseek(fd, (off_t)(inodes[GROUP_INDEX(inode_num)][INODE_INDEX(inode_num)].i_block[0]*1024), SEEK_SET);
+	read(fd, (void *)dirEntry, sizeof(struct os_direntry_t));
 
 	 while (dirEntry->inode) {
 
@@ -151,7 +160,7 @@ int findInodeByName(int fd, int base_inode_num, char* filename, int filetype)
 		curr_inode_num = dirEntry->inode;
 		curr_inode_type = dirEntry->file_type;
 
-		if (filetype == curr_inode_type) {
+		if (filetype == curr_inode_type || filetype == EXT2_FT_ALL) {
 			if(!strcmp(name, filename)) {
 				return(curr_inode_num);
 			}
@@ -166,11 +175,10 @@ int findInodeByName(int fd, int base_inode_num, char* filename, int filetype)
 }
 
 
-void ls(int fd, struct inode_position pos)
+void ls(int fd, int inode_num)
 {
 	char* name;
 	int curr_inode_num;
-	int curr_inode_group;
 	int curr_inode_type;
 
 	// debug("data block addr\t= 0x%x\n", inodes[base_inode_num-1].i_block[0]);
@@ -183,7 +191,7 @@ void ls(int fd, struct inode_position pos)
 
 	struct os_direntry_t* dirEntry = malloc(sizeof(struct os_direntry_t));
 	assert (dirEntry != NULL);
-	lseek(fd, (off_t)(inodes[pos.group][pos.inode-1].i_block[0]*1024), SEEK_SET);
+	lseek(fd, (off_t)(inodes[GROUP_INDEX(inode_num)][INODE_INDEX(inode_num)].i_block[0]*1024), SEEK_SET);
 	read(fd, (void *)dirEntry, sizeof(struct os_direntry_t));
 
 	 while (dirEntry->inode) {
@@ -192,7 +200,6 @@ void ls(int fd, struct inode_position pos)
 		memcpy(name, dirEntry->file_name, dirEntry->name_len);
 		name[dirEntry->name_len+1] = '\0';
 
-		curr_inode_group = pos.group;
 		curr_inode_num = dirEntry->inode;
 		curr_inode_type = dirEntry->file_type;
 
@@ -206,7 +213,7 @@ void ls(int fd, struct inode_position pos)
 			// debug("rec_len\t\t= %d\n", dirEntry->rec_len);
 			// debug("dirEntry->inode\t= %d\n",dirEntry->inode);
 			printInodeType(curr_inode_type);
-			printInodePerm(fd, curr_inode_group, curr_inode_num);
+			printInodePerm(fd, curr_inode_num);
 			printf("%d\t", curr_inode_num);
 			printf("%s\t", name);
 			printf("\n");
@@ -216,20 +223,20 @@ void ls(int fd, struct inode_position pos)
 	return;
 }
 
-int cd(int fd, int base_inode_num)
+int cd(int fd, int inode_num)
 {
 	char dirname[255];
 	int ret;
 
-	//printf("Enter directory name:");
+	//printf("Enter digrouprectory name:");
 	scanf("%s", dirname);
 
-	ret = findInodeByName(fd, base_inode_num, dirname, EXT2_FT_DIR);
+	ret = findInodeByName(fd, inode_num, dirname, EXT2_FT_DIR);
 	// debug("findInodeByName=%d\n", ret);
 
 	if(ret==-1) {
 		printf("Directory %s does not exist\n", dirname);
-		return(base_inode_num);
+		return(inode_num);
 	} else {
 		printf("Now in directory %s\n", dirname);
 		return(ret);
@@ -246,7 +253,7 @@ int cd(int fd, int base_inode_num)
 // #define EXT2_FT_SOCK      6  //  Socket File
 // #define EXT2_FT_SYMLINK   7  //  Symbolic Link
 
-void my_stat(int fd, int base_inode_num)
+void my_stat(int fd, int inode_num)
 {
 	char dirname[255];
 	char file_type[30];
@@ -258,9 +265,10 @@ void my_stat(int fd, int base_inode_num)
 
 	scanf("%s", dirname);
 
-	ret = findInodeByName(fd, base_inode_num, dirname, EXT2_FT_DIR);
+	//TODO - passar parametro para qualquer arquivo
+	ret = findInodeByName(fd, inode_num, dirname, EXT2_FT_ALL);
 
-	lseek(fd, BLOCK_OFFSET(group_descr[0]->bg_inode_table)+(ret-1)*sizeof(struct os_inode_t), SEEK_SET);
+	lseek(fd, inodes[GROUP_INDEX(inode_num)][INODE_INDEX(inode_num)].i_block[0]*1024, SEEK_SET);
 
 	read(fd, (void *)dirEntry, sizeof(struct os_direntry_t));
 
@@ -293,9 +301,9 @@ void my_stat(int fd, int base_inode_num)
 				break;
 		}
 
-	assert(lseek(fd, (off_t)(group_descr[0]->bg_inode_table*1024), SEEK_SET) == (off_t)(group_descr[0]->bg_inode_table*1024));
+	// assert(lseek(fd, (off_t)(group_descr[0]->bg_inode_table*1024), SEEK_SET) == (off_t)(group_descr[0]->bg_inode_table*1024));
 
-	assert(read(fd, (void *)inodes, 0x40000) == 0x40000);
+	// assert(read(fd, (void *)inodes, 0x40000) == 0x40000);
 
 
 	if(ret==-1) {
@@ -318,11 +326,8 @@ void my_stat(int fd, int base_inode_num)
 int shellFs(int fd )
 {
 	char cmd[4];
-	static struct inode_position pwd;
-	pwd.group = 0;
-	pwd.inode = 2;
-	// static int pwd_inode = 2;
-	// static int pwd_group = 0;
+
+	static int pwd_inode = 2;
 
 	printf("dcc-shell-fs$ ");
 	scanf("%s", cmd);
@@ -333,16 +338,16 @@ int shellFs(int fd )
 		return(-1);
 
 	} else if(!strcmp(cmd, "ls")) {
-		ls(fd, pwd);
+		ls(fd, pwd_inode);
 
 	} 
-	// else if(!strcmp(cmd, "cd")) {
-	// 	pwd_inode = cd(fd, pwd_inode);
+	else if(!strcmp(cmd, "cd")) {
+		pwd_inode = cd(fd, pwd_inode);
 
-	// } 
-	// else if(!strcmp(cmd, "stat")) {
-	// 	my_stat(fd, pwd_inode);
-	// } 
+	} 
+	else if(!strcmp(cmd, "stat")) {
+		my_stat(fd, pwd_inode);
+	} 
 	else {
 		printf("Unknown command: %s\n", cmd);
 		return(-EINVAL);
@@ -385,8 +390,8 @@ int main(int argc, char **argv)
 	//Calcula o tamanho do bloco
 	block_size = 1024 << superblock->s_log_block_size;
 
-	//Aloca e o espaço para os descritores de grupo e os lê
-	group_descr = malloc(group_count * sizeof(struct os_blockgroup_descriptor_t*));
+	//Aloca e o espaço para os descris lê
+	group_descr = malloc(group_count*sizeof(struct  os_blockgroup_descriptor_t*));
 	for(i = 0; i < group_count; i++){
 		group_descr[i] = malloc(sizeof(struct os_blockgroup_descriptor_t));
 		lseek(fd, (off_t)(BLOCK_OFFSET(2)+i*sizeof(struct os_blockgroup_descriptor_t)), SEEK_SET);
@@ -395,7 +400,6 @@ int main(int argc, char **argv)
 
 	//Calcula a quantidade de inodes por bloco
 	inodes_per_block = block_size / sizeof(struct os_inode_t);
-
 
 	/* size in blocks of the inode table */
 	itable_blocks = superblock->s_inodes_per_group / inodes_per_block;
@@ -408,7 +412,7 @@ int main(int argc, char **argv)
 	for(i = 0; i < group_count; i++){
 		inodes[i] = malloc(superblock->s_inodes_per_group*superblock->s_inode_size);
 		lseek(fd, (off_t)BLOCK_OFFSET(group_descr[i]->bg_inode_table), SEEK_SET);
-		read(fd, (void *)inodes[i], superblock->s_inodes_per_group*superblock->s_inode_size);
+		read(fd, (void *)inodes[i], itable_blocks*(unsigned int)block_size);
 	}
 
 	while(1) {
