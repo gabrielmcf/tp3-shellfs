@@ -8,6 +8,7 @@
 #include <string.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <time.h>
 
  #include <sys/sysmacros.h>
 #if defined(_AIX)
@@ -39,53 +40,6 @@ u_int32_t block_size;
 struct os_superblock_t *superblock;
 struct os_blockgroup_descriptor_t **group_descr;
 struct os_inode_t **inodes;
-
-struct inode_position {
-	uint32_t group;
-	uint32_t inode;
-};
-
-// struct inode_position pwd = { 0,2 };
-// pwd.group = 0;
-// pwd.inode = 2;
-
-// static void read_inode(int fd, int inode_no, const struct os_blockgroup_descriptor_t group, struct os_inode_t inode){
-// 	lseek(fd, BLOCK_OFFSET(group->bg_inode_table)+(inode_no-1)*sizeof(struct ext2_inode), SEEK_SET);
-// 	read(fd, inode, sizeof(struct ext2_inode));
-// }
-
-// void read_superblock(int fd)
-// {
-// 	superblock = malloc(sizeof(struct os_superblock_t));
-// 	assert(superblock != NULL);
-       
-// 	assert(lseek(fd, (off_t)1024, SEEK_SET) == (off_t)1024);
-// 	assert(read(fd, (void *)superblock, sizeof(struct os_superblock_t)) == sizeof(struct os_superblock_t));
-// }
-
-// void read_blockgroup(int fd)
-// {
-// 	blockgroup = malloc(sizeof(struct os_blockgroup_descriptor_t));
-// 	assert(blockgroup != NULL);
-       
-// 	assert(lseek(fd, (off_t)2048, SEEK_SET) == (off_t)2048);
-// 	assert(read(fd, (void *)blockgroup, sizeof(struct os_blockgroup_descriptor_t)) == sizeof(struct os_blockgroup_descriptor_t));
-// }
-
-
-// void read_inodeTable(int fd)
-// {
-
-// 	// preparing to cache inode table in inodes
-// 	inodes = (struct os_inode_t*)malloc(superblock->s_inodes_count*superblock->s_inode_size);
-// 	assert(inodes != NULL);
-
-// 	// seek to start of inode_table
-// 	assert(lseek(fd, (off_t)(blockgroup->bg_inode_table*1024), SEEK_SET) == (off_t)(blockgroup->bg_inode_table*1024));
-
-// 	assert(read(fd, (void *)inodes, 0x40000) == 0x40000);
-
-// }
 
 void printInodeType(int inode_type)
 {
@@ -143,8 +97,6 @@ int findInodeByName(int fd, int inode_num, char* filename, int filetype)
 	char* name;
 	int curr_inode_num;
 	int curr_inode_type;
-	struct inode_position new_pos;
-	// debug("data block addr\t= 0x%x\n", inodes[base_inode_num-1].i_block[0]);
 
 	struct os_direntry_t* dirEntry = malloc(sizeof(struct os_direntry_t));
 	assert (dirEntry != NULL);
@@ -180,21 +132,16 @@ void ls(int fd, int inode_num)
 	char* name;
 	int curr_inode_num;
 	int curr_inode_type;
-
-	// debug("data block addr\t= 0x%x\n", inodes[base_inode_num-1].i_block[0]);
-
-// -rw-r--r-- 1 gabriel gabriel     0 Jun  9 20:56 arquivo2
-// drwx------ 2 gabriel gabriel 12288 Mai 31 10:23 lost+found
-// drwxr-xr-x 2 root    root     1024 Jun 13 22:24 pasta1
-// drwxr-xr-x 3 gabriel gabriel  1024 Jun 13 21:57 pasta2
-
+	struct os_inode_t inode = inodes[GROUP_INDEX(inode_num)][INODE_INDEX(inode_num)];
+	int read_size = 0;
 
 	struct os_direntry_t* dirEntry = malloc(sizeof(struct os_direntry_t));
 	assert (dirEntry != NULL);
-	lseek(fd, (off_t)(inodes[GROUP_INDEX(inode_num)][INODE_INDEX(inode_num)].i_block[0]*1024), SEEK_SET);
+	lseek(fd, BLOCK_OFFSET(inode.i_block[0]), SEEK_SET);
 	read(fd, (void *)dirEntry, sizeof(struct os_direntry_t));
 
-	 while (dirEntry->inode) {
+	read_size = dirEntry->rec_len;
+	while (dirEntry->inode && read_size <= inode.i_size) {
 
 		name = (char*)malloc(dirEntry->name_len+1);
 		memcpy(name, dirEntry->file_name, dirEntry->name_len);
@@ -205,6 +152,7 @@ void ls(int fd, int inode_num)
 
 		lseek(fd, (dirEntry->rec_len - sizeof(struct os_direntry_t)), SEEK_CUR);
 		assert(read(fd, (void *)dirEntry, sizeof(struct os_direntry_t)) == sizeof(struct os_direntry_t));
+		read_size += dirEntry->rec_len;
 
 		if (name[0] == '.') {
 			if ( name[1]=='.' || name[1]=='\0')
@@ -244,83 +192,79 @@ int cd(int fd, int inode_num)
 
 }
 
-// #define EXT2_FT_UNKNOWN   0  //  Unknown File Type
-// #define EXT2_FT_REG_FILE  1  //  Regular File
-// #define EXT2_FT_DIR       2  //  Directory File
-// #define EXT2_FT_CHRDEV    3  //  Character Device
-// #define EXT2_FT_BLKDEV    4  //  Block Device
-// #define EXT2_FT_FIFO      5  //  Buffer File
-// #define EXT2_FT_SOCK      6  //  Socket File
-// #define EXT2_FT_SYMLINK   7  //  Symbolic Link
-
 void my_stat(int fd, int inode_num)
 {
 	char dirname[255];
-	char file_type[30];
+	char file_type_name[30];
 	char* name;
 	int ret;
 	struct stat true_stat;
-	struct os_inode_t *ino = malloc(sizeof(struct os_inode_t));
+	struct os_inode_t inode = inodes[GROUP_INDEX(inode_num)][INODE_INDEX(inode_num)];
 	struct os_direntry_t* dirEntry = malloc(sizeof(struct os_direntry_t));
+	u_int16_t i_mode = inode.i_mode;
+	int filetype;
+	time_t a_timestamp = (time_t) inode.i_atime;
+	time_t m_timestamp = (time_t) inode.i_mtime;
+	time_t c_timestamp = (time_t) inode.i_ctime;
 
 	scanf("%s", dirname);
 
-	//TODO - passar parametro para qualquer arquivo
 	ret = findInodeByName(fd, inode_num, dirname, EXT2_FT_ALL);
 
-	lseek(fd, inodes[GROUP_INDEX(inode_num)][INODE_INDEX(inode_num)].i_block[0]*1024, SEEK_SET);
-
-	read(fd, (void *)dirEntry, sizeof(struct os_direntry_t));
-
-	stat(dirname, &true_stat);
-	
-	switch(dirEntry->file_type){
-			case EXT2_FT_UNKNOWN: //  Unknown File Type
-				strcpy(file_type,"tipo desconhecido");
-				break;
-			case EXT2_FT_REG_FILE:  //  Regular File
-				strcpy(file_type,"arquivo comum");
-				break;
-			case EXT2_FT_DIR:  //  Directory File
-				strcpy(file_type,"diretório");
-				break;
-			case EXT2_FT_CHRDEV: //  Character Device
-				strcpy(file_type,"dispositivo de caracteres");
-				break;
-			case EXT2_FT_BLKDEV: //  Block Device
-				strcpy(file_type,"dispositivo de bloco");
-				break;
-			case EXT2_FT_FIFO: //  Buffer File
-				strcpy(file_type,"arquivo de buffer");
-				break;
-			case EXT2_FT_SOCK: //  Socket File
-				strcpy(file_type,"soquete");
-				break;
-			case EXT2_FT_SYMLINK: //  Symbolic Link
-				strcpy(file_type,"link simbólico");
-				break;
-		}
-
-	// assert(lseek(fd, (off_t)(group_descr[0]->bg_inode_table*1024), SEEK_SET) == (off_t)(group_descr[0]->bg_inode_table*1024));
-
-	// assert(read(fd, (void *)inodes, 0x40000) == 0x40000);
-
+	if(S_ISREG(i_mode)){ //Regular file
+		strcpy(file_type_name,"arquivo comum");
+		filetype = EXT2_FT_REG_FILE;
+	} else if(S_ISDIR(i_mode)){ //Directory 	
+		strcpy(file_type_name,"diretório");
+		filetype = EXT2_FT_DIR;
+	} else if(S_ISCHR(i_mode)){ //Character Device  
+		strcpy(file_type_name,"dispositivo de caracteres");
+		filetype = EXT2_FT_CHRDEV;
+	} else if(S_ISBLK(i_mode)){ //Block Device	
+		strcpy(file_type_name,"dispositivo de bloco");
+		filetype = EXT2_FT_BLKDEV;
+	} else if(S_ISFIFO(i_mode)){ //Fifo	
+		strcpy(file_type_name,"arquivo de buffer");
+		filetype = EXT2_FT_FIFO;
+	} else if(S_ISSOCK(i_mode)){ //Socket
+		strcpy(file_type_name,"soquete");
+		filetype = EXT2_FT_SOCK;
+	} else if(S_ISLNK(i_mode)){ //Symbolic Link	
+		strcpy(file_type_name,"link simbólico");
+		filetype = EXT2_FT_SYMLINK;
+	} else {
+		strcpy(file_type_name,"desconhecido");
+		filetype = EXT2_FT_UNKNOWN;
+	}
 
 	if(ret==-1) {
 		printf("Arquivo %s não existe!\n", dirname);
 		return;
 	} else {
-		ino = &inodes[0][dirEntry->inode-1];
 		printf("File: \"%s\"\n", dirname);
-		printf("Size: %u\tBlocks: %u\tIO Blocks %d\t%s\n", ino->i_size, ino->i_blocks, 1024 << superblock->s_log_block_size, file_type);
-		printf("Device(ta errado): %u\tInode: %d\tLinks(ta errado): %hu\n", major(true_stat.st_dev), ret, ino->i_links_count);
-		printf("\n\ninode count \t\t= %d\n", superblock->s_inodes_count);
-		printf("inode size \t\t= %d\n", superblock->s_inode_size);
-		printf("inode table address \t= %d\n", group_descr[0]->bg_inode_table);
-		printf("inode table size \t= %dKB\n", (superblock->s_inodes_count*superblock->s_inode_size)>>10);
+		printf("Size: %u\tBlocks: %u\tIO Blocks %d\t%s\n", inode.i_size, inode.i_blocks, 1024 << superblock->s_log_block_size, file_type_name);
+		printf("Device: -\tInode: %d\tLinks: %hu\n", ret, inode.i_links_count);
+		printf("Access: ");
+		printInodeType(filetype);
+		printInodePerm(fd,inode_num);
+		printf("\tUid: %u\t Gid: %u\n", inode.i_uid, inode.i_gid);
+		printf("Access: %s", asctime(gmtime(&a_timestamp)));
+		printf("Modify: %s", asctime(gmtime(&m_timestamp)));
+		printf("Change: %s", asctime(gmtime(&c_timestamp)));
+		printf("Birth: -\n");
 		return;
 	}
 
+}
+
+void sb(int fd){
+	//Lê o superbloco
+	superblock = malloc(sizeof(struct os_superblock_t));
+	assert(superblock != NULL);
+	assert(lseek(fd, (off_t)1024, SEEK_SET) == (off_t)1024);
+	assert(read(fd, (void *)superblock, sizeof(struct os_superblock_t)) == sizeof(struct os_superblock_t));
+
+	// printf("%u",superblock->s)
 }
 
 int shellFs(int fd )
@@ -347,8 +291,9 @@ int shellFs(int fd )
 	} 
 	else if(!strcmp(cmd, "stat")) {
 		my_stat(fd, pwd_inode);
-	} 
-	else {
+	} else if(!strcmp(cmd,"sb")){
+		sb(fd);
+	} else {
 		printf("Unknown command: %s\n", cmd);
 		return(-EINVAL);
 	}
