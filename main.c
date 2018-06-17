@@ -258,13 +258,49 @@ void my_stat(int fd, int inode_num)
 }
 
 void sb(int fd){
+	int i;
+
 	//Lê o superbloco
-	superblock = malloc(sizeof(struct os_superblock_t));
+	struct os_superblock_t *sb = malloc(sizeof(struct os_superblock_t));
 	assert(superblock != NULL);
 	assert(lseek(fd, (off_t)1024, SEEK_SET) == (off_t)1024);
-	assert(read(fd, (void *)superblock, sizeof(struct os_superblock_t)) == sizeof(struct os_superblock_t));
+	assert(read(fd, (void *)sb, sizeof(struct os_superblock_t)) == sizeof(struct os_superblock_t));
 
-	// printf("%u",superblock->s)
+	printf("\nSuperblock informations\n\n");
+	printf("Inodes count: %u\nBlocks count: %u\nSuperuser blocks: %u\n",sb->s_inodes_count, sb->s_blocks_count, sb->s_r_blocks_count);
+	printf("Free blocks: %u\nFree inodes: %u\nFirst data block: %u\n",sb->s_free_blocks_count, sb->s_free_inodes_count,sb->s_first_data_block);
+	printf("Log block size: %u\nShift log frag size: %u\nBlocks per group: %u\n",sb->s_log_block_size,sb->s_log_frag_size,sb->s_blocks_per_group);
+	printf("Frags per group: %u\nInodes per group: %u\nLast mounted time: %u\n",sb->s_frags_per_group,sb->s_inodes_per_group,sb->s_mtime);
+	printf("Last written time: %u\nMounted count since last check: %hu\n",sb->s_wtime,sb->s_mnt_count);
+	printf("Max mount before check: %hu\nMagic number: %x\n",sb->s_max_mnt_count,sb->s_magic);
+	printf("System state: %hu\nError politic: %hu\nVersion info: %u\n",sb->s_state,sb->s_errors,sb->s_minor_rev_level);
+	printf("Last check: %u\nCheck interval: %u\nCreator id: %u\n",sb->s_lastcheck,sb->s_checkinterval,sb->s_creator_os);
+	printf("Revision: %u\nDefaut uId: %u\nDefault gId: %u\n",sb->s_rev_level,sb->s_def_resuid,sb->s_def_resgid);
+	printf("First inode for files: %u\nInode size: %u\nThis block group: %hu\n",sb->s_first_ino,sb->s_inode_size,sb->s_block_group_nr);
+	printf("Compat. features: %u\nIncompat. features: %u\n",sb->s_feature_compat,sb->s_feature_incompat);
+	printf("Read only features: %u\n",sb->s_feature_ro_compat);
+	printf("UUID: ");
+	for(i = 0; i < 16; i++){
+		printf("%hhu",sb->s_uuid[i]);
+	}
+	printf("\n");
+	printf("Volume name: ");
+	for(i = 0; i < 16; i++){
+		printf("%hhu",sb->s_volume_name[i]);
+	}
+	printf("\n");
+	printf("Last mount point: %s\n", sb->s_last_mounted);
+	printf("Compressions: %u\n", sb->s_algo_bitmap);
+	printf("Pre-allocated blocks for file: %hhu\n",sb->s_prealloc_blocks);
+	printf("Pre-allocated blocks for dir: %hhu\n",sb->s_prealloc_dir_blocks);
+	printf("Journal UUID (if has EXT3 journal): %hhu\n",sb->s_journal_uuid);
+	printf("Inode number of journal file: %u\n",sb->s_journal_inum);
+	printf("Device number of journal file: %u\n",sb->s_journal_dev);
+	printf("First inode on list to delete: %u\n",sb->s_last_orphan);
+	printf("Hash seeds: %u %u %u %u\n", sb->s_hash_seed[0], sb->s_hash_seed[1], sb->s_hash_seed[2], sb->s_hash_seed[3] );
+	printf("Hash version: %hhu\n", sb->s_def_hash_version);
+	printf("Default mount options: %u\n",sb->s_default_mount_options);
+	printf("Block ID of first meta-block group: %u\n\n",sb->s_first_meta_bg);
 }
 
 int shellFs(int fd )
