@@ -369,14 +369,14 @@ int main(int argc, char **argv)
 	block_size = 1024 << superblock->s_log_block_size;
 
 	//Aloca e o espaço para os descritores de grupo e os lê
-	group_descr = malloc(group_count);
+	group_descr = malloc(group_count * sizeof(struct os_blockgroup_descriptor_t*));
 	for(i = 0; i < group_count; i++){
 		group_descr[i] = malloc(sizeof(struct os_blockgroup_descriptor_t));
-		lseek(fd, (off_t)BLOCK_OFFSET(2), SEEK_SET);
-		read(fd, (void *)group_descr[i], group_count*sizeof(struct os_blockgroup_descriptor_t));
+		lseek(fd, (off_t)(1024 + (i * superblock->s_blocks_per_group * block_size) + BLOCK_OFFSET(1)), SEEK_SET);
+		read(fd, (void *)group_descr[i], sizeof(struct os_blockgroup_descriptor_t));
 	}
 
-	//Calcula a quantidade de inodes por
+	//Calcula a quantidade de inodes por bloco
 	inodes_per_block = block_size / sizeof(struct os_inode_t);
 
 
@@ -384,7 +384,7 @@ int main(int argc, char **argv)
 	itable_blocks = superblock->s_inodes_per_group / inodes_per_block;
 
 	// preparing to cache inode table in inodes
-	inodes = malloc(group_count);
+	inodes = malloc(group_count*sizeof(struct os_inode_t*));
 	assert(inodes != NULL);
 
 	for(i = 0; i < group_count; i++){
