@@ -61,9 +61,8 @@ void printInodeType(int inode_type)
 	}
 }
 
-void printInodePerm(int fd, int inode_num)
+void printInodePerm(int inode_num)
 {
-	//int curr_pos = lseek(fd, 0, SEEK_CUR);
 	short int mode = GET_INODE(inode_num).i_mode;
 
 	mode & EXT2_S_IRUSR ? printf("r") : printf("-");
@@ -77,8 +76,6 @@ void printInodePerm(int fd, int inode_num)
 	mode & EXT2_S_IXOTH ? printf("x") : printf("-");
 
 	printf("\t");
-
-	//lseek(fd, curr_pos, SEEK_SET);
 }
 
 int findInodeByName(int fd, int inode_num, char* filename, int filetype)
@@ -148,7 +145,7 @@ void ls(int fd, int inode_num)
 				continue;
 		} else {
 			printInodeType(curr_inode_type);
-			printInodePerm(fd, curr_inode_num);
+			printInodePerm(curr_inode_num);
 			printf("%d\t", curr_inode_num);
 			printf("%s\t", name);
 			printf("\n");
@@ -171,7 +168,7 @@ int cd(int fd, int inode_num)
 		printf("O diretório %s não existe\n", dirname);
 		return(inode_num);
 	} else {
-		printf("Now in directory %s\n", dirname);
+		printf("No diretório %s\n", dirname);
 		return(ret);
 	}
 
@@ -184,17 +181,23 @@ void my_stat(int fd, int inode_num)
 	char* name;
 	int ret;
 	struct stat true_stat;
-	struct os_inode_t inode = inodes[GROUP_INDEX(inode_num)][INODE_INDEX(inode_num)];
+	struct os_inode_t *inode = malloc(sizeof(struct os_inode_t));
 	struct os_direntry_t* dirEntry = malloc(sizeof(struct os_direntry_t));
-	u_int16_t i_mode = inode.i_mode;
+	u_int16_t i_mode;
 	int filetype;
-	time_t a_timestamp = (time_t) inode.i_atime;
-	time_t m_timestamp = (time_t) inode.i_mtime;
-	time_t c_timestamp = (time_t) inode.i_ctime;
+	time_t a_timestamp;
+	time_t m_timestamp;
+	time_t c_timestamp;
 
 	scanf("%s", dirname);
 
 	ret = findInodeByName(fd, inode_num, dirname, EXT2_FT_ALL);
+
+	inode = &GET_INODE(ret);
+	i_mode = inode->i_mode;
+	a_timestamp = (time_t) inode->i_atime;
+	m_timestamp = (time_t) inode->i_mtime;
+	c_timestamp = (time_t) inode->i_ctime;
 
 	if(S_ISREG(i_mode)){ //Regular file
 		strcpy(file_type_name,"arquivo comum");
@@ -227,12 +230,12 @@ void my_stat(int fd, int inode_num)
 		return;
 	} else {
 		printf("File: \"%s\"\n", dirname);
-		printf("Size: %u\tBlocks: %u\tIO Blocks %d\t%s\n", inode.i_size, inode.i_blocks, 1024 << superblock->s_log_block_size, file_type_name);
-		printf("Device: -\tInode: %d\tLinks: %hu\n", ret, inode.i_links_count);
+		printf("Size: %u\tBlocks: %u\tIO Blocks %d\t%s\n", inode->i_size, inode->i_blocks, 1024 << superblock->s_log_block_size, file_type_name);
+		printf("Device: -\tInode: %d\tLinks: %hu\n", ret, inode->i_links_count);
 		printf("Access: ");
 		printInodeType(filetype);
-		printInodePerm(fd,inode_num);
-		printf("\tUid: %u\t Gid: %u\n", inode.i_uid, inode.i_gid);
+		printInodePerm(inode_num);
+		printf("\tUid: %u\t Gid: %u\n", inode->i_uid, inode->i_gid);
 		printf("Access: %s", asctime(gmtime(&a_timestamp)));
 		printf("Modify: %s", asctime(gmtime(&m_timestamp)));
 		printf("Change: %s", asctime(gmtime(&c_timestamp)));
@@ -243,7 +246,7 @@ void my_stat(int fd, int inode_num)
 }
 
 void find(int fd,int inode_num){
-	struct os_inode_t inode = inodes[GROUP_INDEX(inode_num)][INODE_INDEX(inode_num)];
+	struct os_inode_t inode = GET_INODE(inode_num);
 	int read_size = 0;
 
 	struct os_direntry_t* dirEntry = malloc(sizeof(struct os_direntry_t));
@@ -327,8 +330,6 @@ int shellFs(int fd )
 	printf("dcc-shell-fs$ ");
 	scanf("%s", cmd);
 
-	// debug("cmd=%s\n", cmd);
-
 	if(!strcmp(cmd, "q") || !strcmp(cmd, "exit")) {
 		return(-1);
 
@@ -349,7 +350,7 @@ int shellFs(int fd )
 	else if(!strcmp(cmd,"sb")){
 		sb(fd);
 	} else {
-		printf("Unknown command: %s\n", cmd);
+		printf("Comando desconhecido: %s\n", cmd);
 		return(-EINVAL);
 	}
 
