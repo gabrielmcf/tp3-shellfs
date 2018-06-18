@@ -242,6 +242,36 @@ void my_stat(int fd, int inode_num)
 
 }
 
+void find(int fd,int inode_num){
+	struct os_inode_t inode = inodes[GROUP_INDEX(inode_num)][INODE_INDEX(inode_num)];
+	int read_size = 0;
+
+	struct os_direntry_t* dirEntry = malloc(sizeof(struct os_direntry_t));
+	lseek(fd, BLOCK_OFFSET(inode.i_block[0]), SEEK_SET);
+	read(fd, (void *)dirEntry, sizeof(struct os_direntry_t));
+	unsigned int pular = BLOCK_OFFSET(inode.i_block[0]) + sizeof(struct os_direntry_t);
+	
+	read_size = dirEntry->rec_len;
+	while (dirEntry->inode && read_size <= inode.i_size) {
+		//Se não for diretório "." nem diretório ".." , imprima o nome
+		if(strcmp(dirEntry->file_name,".") && strcmp(dirEntry->file_name,"..")){
+			printf("./%s\n",dirEntry->file_name);
+
+			//Se for um diretório, chame recursivamente para imprimir o nome dos filhos dele.
+			if(dirEntry->file_type == EXT2_FT_ALL){
+				find(fd,dirEntry->inode);
+			}
+		}
+		//Passa para o próximo diretório.
+		pular += (dirEntry->rec_len - sizeof(struct os_direntry_t));
+		lseek(fd, pular, SEEK_SET);
+		assert(read(fd, (void *)dirEntry, sizeof(struct os_direntry_t)) == sizeof(struct os_direntry_t));
+		read_size += dirEntry->rec_len;
+		
+	}
+	return;
+}
+
 void sb(int fd){
 	int i;
 
@@ -312,7 +342,11 @@ int shellFs(int fd )
 	} 
 	else if(!strcmp(cmd, "stat")) {
 		my_stat(fd, pwd_inode);
-	} else if(!strcmp(cmd,"sb")){
+	}
+	else if(!strcmp(cmd, "find")) {
+		find(fd, pwd_inode);
+	} 
+	else if(!strcmp(cmd,"sb")){
 		sb(fd);
 	} else {
 		printf("Unknown command: %s\n", cmd);
