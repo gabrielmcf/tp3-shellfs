@@ -4,22 +4,10 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>
 #include <string.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <time.h>
-
- #include <sys/sysmacros.h>
-#if defined(_AIX)
-#define _BSD
-#endif
-#if defined(__sgi) || defined(__sun)            /* Some systems need this */
-#include <sys/mkdev.h>                          /* To get major() and minor() */
-#endif
-#if defined(__hpux)                             /* Other systems need this */
-#include <sys/mknod.h>
-#endif
 
 #include "inc/types.h"
 #include "inc/superblock.h"
@@ -35,6 +23,7 @@
 
 #define GROUP_INDEX(inode_num) (inode_num - 1)/superblock->s_inodes_per_group
 #define INODE_INDEX(inode_num) (inode_num - 1)%superblock->s_inodes_per_group
+#define GET_INODE(inode_num) inodes[GROUP_INDEX(inode_num)][INODE_INDEX(inode_num)]
 
 u_int32_t block_size;
 struct os_superblock_t *superblock;
@@ -75,7 +64,7 @@ void printInodeType(int inode_type)
 void printInodePerm(int fd, int inode_num)
 {
 	//int curr_pos = lseek(fd, 0, SEEK_CUR);
-	short int mode = inodes[GROUP_INDEX(inode_num)][INODE_INDEX(inode_num)].i_mode;
+	short int mode = GET_INODE(inode_num).i_mode;
 
 	mode & EXT2_S_IRUSR ? printf("r") : printf("-");
 	mode & EXT2_S_IWUSR ? printf("w") : printf("-");
@@ -100,7 +89,7 @@ int findInodeByName(int fd, int inode_num, char* filename, int filetype)
 
 	struct os_direntry_t* dirEntry = malloc(sizeof(struct os_direntry_t));
 	assert (dirEntry != NULL);
-	lseek(fd, (off_t)(inodes[GROUP_INDEX(inode_num)][INODE_INDEX(inode_num)].i_block[0]*1024), SEEK_SET);
+	lseek(fd, (off_t)(GET_INODE(inode_num).i_block[0]*1024), SEEK_SET);
 	read(fd, (void *)dirEntry, sizeof(struct os_direntry_t));
 
 	 while (dirEntry->inode) {
@@ -132,7 +121,7 @@ void ls(int fd, int inode_num)
 	char* name;
 	int curr_inode_num;
 	int curr_inode_type;
-	struct os_inode_t inode = inodes[GROUP_INDEX(inode_num)][INODE_INDEX(inode_num)];
+	struct os_inode_t inode = GET_INODE(inode_num);
 	int read_size = 0;
 
 	struct os_direntry_t* dirEntry = malloc(sizeof(struct os_direntry_t));
@@ -158,8 +147,6 @@ void ls(int fd, int inode_num)
 			if ( name[1]=='.' || name[1]=='\0')
 				continue;
 		} else {
-			// debug("rec_len\t\t= %d\n", dirEntry->rec_len);
-			// debug("dirEntry->inode\t= %d\n",dirEntry->inode);
 			printInodeType(curr_inode_type);
 			printInodePerm(fd, curr_inode_num);
 			printf("%d\t", curr_inode_num);
@@ -176,14 +163,12 @@ int cd(int fd, int inode_num)
 	char dirname[255];
 	int ret;
 
-	//printf("Enter digrouprectory name:");
 	scanf("%s", dirname);
 
 	ret = findInodeByName(fd, inode_num, dirname, EXT2_FT_DIR);
-	// debug("findInodeByName=%d\n", ret);
 
 	if(ret==-1) {
-		printf("Directory %s does not exist\n", dirname);
+		printf("O diretório %s não existe\n", dirname);
 		return(inode_num);
 	} else {
 		printf("Now in directory %s\n", dirname);
